@@ -22,7 +22,9 @@ BLUE2 = (0, 100, 255)
 BLACK = (0, 0, 0)
 BLOCK_SIZE = 20     #size of the blocks in the "grid"
 SPEED = 10        
-REWARD_DESIGN = 1 # 1: +1 each time the score increase, 2: The +self.score when the game is done. 
+APPLE_REWARD = 100
+REWARD_DESIGN = 1 # 1: +APPLE_REWARD each time the score increase, 2: The +self.score when the game is done
+REWARD_TOWARD_APPLE = True # If True, gives +1 reward for going towards the apple and -1 for going away, if False gives -1 for each step
 
 class SnakeGame:
 
@@ -30,9 +32,10 @@ class SnakeGame:
         self.w = w
         self.h = h
         # init display
-        if (create_visual):
+        self.create_visual = create_visual
+        if (self.create_visual):
             self.display = pygame.display.set_mode((self.w, self.h))    #I think this creates the window
-        pygame.display.set_caption('Snake')
+            pygame.display.set_caption('Snake')
         self.clock = pygame.time.Clock()
         # init game state
         self.direction = Direction.RIGHT        #start the snake going to the right
@@ -89,7 +92,8 @@ class SnakeGame:
             self.snake.pop()        #removes the last element of the snake
 
         # 5. update ui and clock
-        self._update_ui()
+        if self.create_visual:
+            self._update_ui()
         self.clock.tick(SPEED)
 
         # 6. return game over and score
@@ -132,7 +136,7 @@ class SnakeGame:
 
         self.head = Point(x, y) 
 
-    def step( self , action , create_visual = False ) : 
+    def step( self , action , total_reward=None ) : 
         """
         Input: The Action. 
             1. 1 is equal to right. 
@@ -145,15 +149,24 @@ class SnakeGame:
             3. Done. 
         """ 
 
+        # Check if the action is valid.
+        if action not in [1,2,3,4] :
+            state = self.get_the_state_representation()
+            return state , -1 , False
+
         # 1. Collect the user input. 
-        if action == 1 : 
+        if (action == 1) and (self.direction != Direction.LEFT): 
             self.direction = Direction.RIGHT  
-        if action == 2 : 
+        elif (action == 2) and (self.direction != Direction.RIGHT): 
             self.direction = Direction.LEFT 
-        if action == 3 : 
+        elif (action == 3) and (self.direction != Direction.DOWN): 
             self.direction = Direction.UP 
-        if action == 4 : 
+        elif (action == 4) and (self.direction != Direction.UP): 
             self.direction = Direction.DOWN 
+        else:
+            if (total_reward != None and total_reward < -100):
+                return self.get_the_state_representation() , -1 , True
+            return self.get_the_state_representation() , -1 , False
 
         # 2. Move. 
         self._move(self.direction) # Update the head. 
@@ -173,17 +186,46 @@ class SnakeGame:
             self.snake.pop() # Remove the last element of the snake. 
 
         # 5. Update the UI and the clock. 
-        if create_visual == True : 
+        if self.create_visual == True : 
             self.render() 
 
         # 6. Return the State, Reward, and the Done. 
         if REWARD_DESIGN == 1 : 
-            reward = self.reward_to_give 
+            reward = self.reward_to_give * APPLE_REWARD
             self.reward_to_give = 0 
         if REWARD_DESIGN == 2 : 
             reward = 0 
             if game_over == True : 
                 reward = self.score 
+
+        if REWARD_TOWARD_APPLE:
+            if self.direction == Direction.RIGHT:
+                if self.head.x < self.food.x:
+                    reward += 1
+                else:
+                    reward -= 1
+            if self.direction == Direction.LEFT:
+                if self.head.x > self.food.x:
+                    reward += 1
+                else:
+                    reward -= 1
+            if self.direction == Direction.DOWN:
+                if self.head.y < self.food.y:
+                    reward += 1
+                else:
+                    reward -= 1
+            if self.direction == Direction.UP:
+                if self.head.y > self.food.y:
+                    reward += 1
+                else:
+                    reward -= 1
+        else: # Negative reward for each step
+            reward -= 1
+        
+        # Massive negative reward if the snake hits itself
+        if self.head in self.snake[1:]:
+            reward = -1000
+
         state = self.get_the_state_representation() 
         return state , reward , game_over 
 
@@ -199,9 +241,44 @@ class SnakeGame:
         """ 
         self._update_ui() 
         self.clock.tick( SPEED ) 
+    
+    def is_blocked( self ):
+        """
+        Test if the snake is blocked in any direction.
+        """
+        directions = [Point(self.head.x - BLOCK_SIZE, self.head.y),Point(self.head.x + BLOCK_SIZE, self.head.y),Point(self.head.x, self.head.y - BLOCK_SIZE),Point(self.head.x, self.head.y + BLOCK_SIZE)]
+        outcomes = [0,0,0,0]
+        for i in range(len(directions)):
+            # hits boundary
+            if directions[i][0] > self.w - BLOCK_SIZE or directions[i][0] < 0 or directions[i][1] > self.h - BLOCK_SIZE or directions[i][1] < 0:
+                outcomes[i] = 1
+            # hits itself
+            if directions[i] in self.snake[1:]:
+                outcomes[i] = 1
+        return outcomes
+    
+    def get_apple_direction( self ):
+        """
+        Return the direction of the apple.
+        """
+        apple_direction = [0,0,0,0]
+        if self.head.x < self.food.x:
+            apple_direction[0] = 1
+        if self.head.x > self.food.x:
+            apple_direction[1] = 1
+        if self.head.y < self.food.y:
+            apple_direction[2] = 1
+        if self.head.y > self.food.y:
+            apple_direction[3] = 1
+
+        return apple_direction
 
     def get_the_state_representation( self ) : 
         """
         Return the state in Raw form, that the game represent. 
         """
-        return ( self.snake , self.direction , self.head , self.score , self.food , self.h , self.w , BLOCK_SIZE ) 
+        direction = "down" if self.direction == Direction.DOWN else "up" if self.direction == Direction.UP else "left" if self.direction == Direction.LEFT else "right"
+        blocked_paths = self.is_blocked()
+        apple_direction = self.get_apple_direction()
+        # self.head and self.food are Point objects, cause NaN issues with neural network
+        return ( self.snake , direction , self.head , self.score , self.food , self.h , self.w , BLOCK_SIZE, blocked_paths, apple_direction )

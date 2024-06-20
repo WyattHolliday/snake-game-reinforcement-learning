@@ -5,12 +5,12 @@ import random
 
 class Agent: 
     
-    def __init__( self ) : 
+    def __init__( self, create_visual ) : 
         """
         1. Initialize the agent. 
         2. Initialize the simulator. 
         """ 
-        self.simulator = SnakeGame() 
+        self.simulator = SnakeGame(create_visual) 
 
     def learn_and_then_evaluate( self , train_count , test_interval , trial_count , create_visual_at_train = False , create_visual_at_test = False ) : 
         """ 
